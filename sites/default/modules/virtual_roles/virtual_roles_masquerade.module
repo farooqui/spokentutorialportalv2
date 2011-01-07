@@ -1,0 +1,108 @@
+<?php
+// $Id: virtual_roles_masquerade.module,v 1.1 2010/06/03 05:48:25 coreyp1 Exp $
+
+/**
+ * Implementation of hook_boot().
+ */
+function virtual_roles_masquerade_boot() {
+  $pid = _virtual_roles_masquerade_get_real_uid();
+  if ($pid) {
+    global $user;
+    $temp_user = $user;
+    $result = db_query('SELECT * FROM {users} u WHERE u.uid = %d', $pid);
+    if ($user = db_fetch_object($result)) {
+      $user = drupal_unpack($user);
+      $user->cache = time();
+      $user->roles = array();
+      $user->roles[DRUPAL_AUTHENTICATED_RID] = 'authenticated user';
+      $result = db_query('SELECT r.rid, r.name FROM {role} r INNER JOIN {users_roles} ur ON ur.rid = r.rid WHERE ur.uid = %d', $user->uid);
+      while ($role = db_fetch_object($result)) {
+        $user->roles[$role->rid] = $role->name;
+      }
+      $user->roles = virtual_roles_get_roles($user);
+      if (!empty($user->roles)) {
+        $inheritable = variable_get('virtual_roles_masquerade_roles', array());
+        foreach ($user->roles as $rid => $role) {
+          if (empty($inheritable[$rid])) {
+            unset($user->roles[$rid]);
+          }
+        }
+      }
+      $temp_user->roles += $user->roles;
+      $user = $temp_user;
+      _virtual_roles_masquerade_stored_roles($user->roles);
+    }
+    else {
+      $user = $temp_user;
+    }
+  }
+}
+
+function _virtual_roles_masquerade_get_real_uid() {
+  static $uid = NULL;
+  if (is_null($uid)) {
+    global $user;
+    $uid = db_result(db_query("SELECT uid_from FROM {masquerade} WHERE sid = '%s' AND uid_as = %d", session_id(), $user->uid));
+  }
+  return $uid;
+}
+
+/**
+ * Implementation of hook_user().
+ */
+function virtual_roles_masquerade_user($op, &$edit, &$account, $category = NULL) {
+  switch ($op) {
+    case 'load' :
+      global $user;
+      if ($user->uid == $account->uid) {
+        $roles = _virtual_roles_masquerade_stored_roles();
+        if (!empty($roles)) {
+          $user->roles = $roles;
+        }
+      }
+      break;
+  }
+}
+
+/**
+ * Helper function to load the correct permissions for the logged-in user
+ */
+function _virtual_roles_masquerade_stored_roles($new_roles = NULL) {
+  static $roles = array();
+  if (!is_null($new_roles)) {
+    $roles = $new_roles;
+  }
+  return $roles;
+}
+
+/**
+ * Implementation of hook_menu().
+ */
+function virtual_roles_masquerade_menu() {
+  $items = array();
+  $items['admin/user/roles/virtual_roles_masquerade'] = array(
+    'title' => 'Virtual Roles Masquerade',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('virtual_roles_masquerade_settings_form'),
+    'access arguments' => array('administer virtual role'),
+    'type' => MENU_LOCAL_TASK,
+  );
+  return $items;
+}
+
+/**
+ * Form for the admin/user/roles/virtual_roles_masquerade callback
+ */
+function virtual_roles_masquerade_settings_form() {
+  $form = array();
+  $options = user_roles();
+  $form['virtual_roles_masquerade_roles'] = array(
+    '#type' => 'checkboxes',
+    '#title' => t('Roles that can be inherited'),
+    '#description' => t('Select which roles that you want to be able to be inherited from the originally logged-in user\'s account when they are masquerading as someone else.'),
+    '#default_value' => variable_get('virtual_roles_masquerade_roles', array()),
+    '#options' => $options,
+  );
+  return system_settings_form($form);
+}
+

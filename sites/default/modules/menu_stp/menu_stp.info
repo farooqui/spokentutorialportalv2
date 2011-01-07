@@ -1,0 +1,12 @@
+; $Id: menu_stp.info,v 1.3.2.3 2009/05/27 02:17:04 rwohleb Exp $
+name = Menu Subtree Permissions
+description = Allow users to edit some parts of the menu
+dependencies[] = menu
+core = 6.x
+
+; Information added by drupal.org packaging script on 2009-05-27
+version = "6.x-1.1"
+core = "6.x"
+project = "menu_stp"
+datestamp = "1243391447"
+

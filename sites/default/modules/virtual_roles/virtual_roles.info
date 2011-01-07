@@ -1,0 +1,12 @@
+; $Id: virtual_roles.info,v 1.1 2010/06/03 05:48:25 coreyp1 Exp $
+name = Virtual Roles
+description = Temporarily grants roles to users when viewing specific pages.
+core = 6.x
+
+
+; Information added by drupal.org packaging script on 2010-06-03
+version = "6.x-1.0"
+core = "6.x"
+project = "virtual_roles"
+datestamp = "1275545715"
+

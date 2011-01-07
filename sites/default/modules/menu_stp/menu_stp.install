@@ -1,0 +1,69 @@
+<?php
+// $Id: menu_stp.install,v 1.2.2.2 2009/05/27 02:17:04 rwohleb Exp $
+
+/**
+ * Implementation of hook_install().
+ */
+function menu_stp_install() {
+  // Create tables.
+  drupal_install_schema('menu_stp');
+  
+  // make sure we have more weight than "menu"
+  db_query("UPDATE {system} SET weight = 10 WHERE name = 'menu_stp'");
+}
+
+/**
+ * Implementation of hook_schema().
+ */
+function menu_stp_schema() {
+  $schema['menu_stp_roles'] = array(
+    'fields' => array(
+      'mlid'    => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'rid'    => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+    ),
+    'indexes' => array(
+      'mlid'   => array('mlid'),
+      'rid'   => array('rid'),
+    ),
+    'primary key' => array('mlid', 'rid'),
+  );
+  
+  $schema['menu_stp_menu_roles'] = array(
+    'fields' => array(
+      'menu_name' => array(
+        'type' => 'varchar',
+        'length' => 32,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'rid'    => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+    ),
+    'indexes' => array(
+      'menu_name'   => array('menu_name'),
+      'rid'   => array('rid'),
+    ),
+    'primary key' => array('menu_name', 'rid'),
+  );
+
+  return $schema;
+}
+
+/**
+ * Implementation of hook_uninstall().
+ */
+function menu_stp_uninstall() {
+  // Remove tables.
+  drupal_uninstall_schema('menu_stp');
+}

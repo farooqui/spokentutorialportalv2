@@ -1,0 +1,89 @@
+<?php 
+
+function st_video_node_info(){
+	return array(
+		'st_video' => array(
+			'name' => t('Spoken tutorial video'),
+			'module' => 'st_video',
+			'description' => t('Spoken tutrial video'),
+		),
+	);
+}
+
+function st_video_perm(){
+	return array(
+		'create video content',
+		'edit own video content',
+		'edit any video content',
+		'delete own video content',
+		'delete any video content',
+	);
+}
+
+function st_video_menu(){
+	$items = array();
+	$items['stvideo/listscript'] = array(
+		'page callback' => '_get_script_elem',
+        'access arguments' => array('access content'),
+        'type' => MENU_CALLBACK,
+	);
+}
+
+function st_video_form_alter(&$form, $form_state, $form_id){
+	if ($form_id == 'st_video_node_form'){
+		$node = $form['#node'];
+		$form['#attributes'] = array('enctype' => 'multipart/form-data');
+		$form['title']= array(
+			'#title' => t('Title'),
+			'#type' => 'textfield',
+			'#required' => TRUE,
+			'#default_value' => $node->title,
+			'#weight' => -2,
+		);
+		$form['file_upload'] = array(
+        	'#type' => 'file',
+        	'#title' => 'Video file'
+        );
+        $form['#submit'][] = 'st_video_file_upload_handler';
+	}
+}
+
+function st_video_file_upload_handler($form,&$form_state){
+	$validators = array();
+	if ($file = file_save_upload('file_upload', $validators)) {
+		$destination = 'sites/default/files/st_videos/original'.$file->filename;
+		
+		file_copy($file, $destination, FILE_EXISTS_REPLACE);
+		$form_state['values']['fileid'] = $file->fid;	
+	}
+}
+
+function st_video_nodeapi(&$node, $op, $arg = 0){
+	switch($op){
+		case 'insert':
+			$obj = new stdClass();
+			$obj->nid = $node->nid;
+			$obj->vid = $node->vid;
+			$obj->fid = $node->fileid;
+			drupal_write_record('st_video_files',$obj);
+		break;
+	}
+}
+
+function st_video_cron(){
+	print 'cron for video';
+	st_process_video();
+}
+
+function st_process_video(){
+	$ffmpeg = '/usr/bin/ffmpeg';
+	$command = '-y -i !videofile -f flv -ar 22050 -ab !audiobitrate -s !size -b !videobitrate -qscale 1 !convertfile';
+	$sql = 'select * from {st_video_files} sf join {files} f on f.fid=sf.fid where sf.status=0';
+	$result = db_query($sql);
+	while($file = db_fetch_array($result)){
+		print_r($file);
+		$converted = substr($file['filename'],0,-3).'flv';
+		$cmd = $ffmpeg.' -i '.$file->filepath.' '.$converted.' 2>&1';
+		print $cmd;
+	}
+}

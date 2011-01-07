@@ -1,0 +1,51 @@
+<?php
+// $Id: annotate.install,v 1.7 2009/09/04 14:55:43 clemenstolboom Exp $
+
+/**
+ * Implementation of hook_schema()
+ */
+function annotate_schema() {
+  $schema['annotations'] = array(
+    'description' => 'stores notes on a one note per user per node base.',
+    'fields' => array(
+      'uid' => array('type' => 'int', 'unsigned' => true, 'not null' => true, 'default' => 0),
+      'nid' => array('type' => 'int', 'unsigned' => true, 'not null' => true, 'default' => 0),
+      'visibility' => array('type' => 'int', 'unsigned' => true, 'default' => 0),
+      'note_format' => array('type' => 'int', 'unsigned' => true, 'default' => 0),
+      'note' => array('type' => 'text', 'not null' => true),
+      'timestamp' => array('type' => 'int', 'unsigned' => true, 'not null' => true, 'default' => 0),
+    ),
+    'indexes' => array(
+      'uid' => array('uid'),
+      'nid' => array('nid'),
+    ),
+    'primary key' => array('uid', 'nid', 'timestamp'),
+  );
+  
+  return $schema;
+}
+
+function annotate_update_6100() {
+  $ret = array();
+  db_drop_primary_key($ret, 'annotations');
+  db_add_primary_key($ret, 'annotations', array('uid', 'nid', 'timestamp'));  
+  return $ret; 
+}
+
+/**
+ * Implementation of hook_install()
+ */
+function annotate_install() {
+  drupal_install_schema('annotate');
+}
+
+/**
+ * Implementation of hook_uninstall()
+ */
+function annotate_uninstall() {
+  variable_del('annotate_show_expanded');
+  variable_del('annotate_nodetypes');
+  variable_del('annotate_nodetypes_multiple');
+  
+  drupal_uninstall_schema('annotate');
+}

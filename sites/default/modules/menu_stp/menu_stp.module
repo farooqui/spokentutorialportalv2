@@ -1,0 +1,403 @@
+<?php
+// $Id: menu_stp.module,v 1.4.2.2 2009/05/27 02:17:05 rwohleb Exp $
+
+/**
+ * @file
+ * Allow user to add nodes into specific portions of the menu structure.
+ */
+ 
+// TODO: Handle node deletion
+
+/**
+ * Implementation of hook_form_alter().
+ */
+function menu_stp_form_alter(&$form, &$form_state, $form_id) {
+  switch ($form_id) {
+    case 'menu_edit_menu':
+      _menu_stp_form_alter_menu_edit_menu($form, $form_state, $form_id);
+      break;
+      
+    case 'menu_edit_item':
+      // Skip if this is a new menu item.
+      // TODO: Is this required?
+      if (empty($form['menu']['mlid']['#value'])) {
+        return;
+      }
+      
+      _menu_stp_form_alter_menu_edit_item(&$form, &$form_state, $form_id);
+      break;
+      
+    case 'menu_delete_menu_confirm':
+      // Register submit handler.
+      $form['#submit'][] = 'menu_stp_delete_menu_confirm';
+      break;
+
+    case 'menu_item_delete_form':
+      // Register submit handler.
+      $form['#submit'][] = 'menu_stp_delete_menu_item_confirm';
+      break;
+
+    default:
+      // Is this a node edit form?
+      if (isset($form['#node']) && $form['#node']->type .'_node_form' == $form_id) {
+        // Skip if user has 'administer menu' permission.
+        if (user_access('administer menu')) {
+          return;
+        }
+
+        // Modify the menu form elements.
+        _menu_stp_form_alter_node_edit_form($form, $form_state, $form_id);
+      }
+  }
+}
+
+function _menu_stp_form_alter_menu_edit_menu(&$form, &$form_state, $form_id) {
+  $mlid = 0;
+  $menu_name = (!empty($form['menu_name']['#value'])) ? $form['menu_name']['#value'] : '';
+  
+  // Register submit handler.
+  $form['#submit'][] = 'menu_stp_form_submission';
+
+  // Add form elements.
+  $form += _menu_stp_form($mlid, $menu_name);
+}
+
+function _menu_stp_form_alter_menu_edit_item(&$form, &$form_state, $form_id) {
+  $mlid = (!empty($form['menu']['mlid']['#value'])) ? $form['menu']['mlid']['#value'] : 0;
+  $menu_name = '';
+  
+  // Register submit handler.
+  $form['#submit'][] = 'menu_stp_form_submission';
+
+  // Add form elements.
+  $form += _menu_stp_form($mlid);
+}
+
+/**
+ * Helper function that creates the STP form.
+ * If $mlid is provided it assumes this is for a sub-tree.
+ * If $menu_name is provided it assumes it is for a menu root.
+ */
+function _menu_stp_form($mlid, $menu_name = '') {
+  $form = array();
+  
+  // Add fields for additional permissions.
+  $form['menu_stp'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Menu Sub-tree Permissions'),
+    '#access' => user_access('administer menu'),
+    '#collapsible' => TRUE,
+    '#collapsed' => TRUE,
+    '#weight' => variable_get('menu_stp_item_edit_weight', -10),                                 
+  );
+
+  $form['menu_stp']['menu_stp_perms_roles'] = array(
+    '#type' => 'checkboxes',
+    '#title' => t('Roles'),
+    '#options' => user_roles(TRUE), // Get all roles, except anonymous.
+    '#default_value' => !empty($mlid) ? _menu_stp_get_rids_by_mlid($mlid) : _menu_stp_get_rids_by_menu_name($menu_name),
+    '#description' => t('Select the roles that will be allowed to edit this sub-tree.'),
+  );
+  // TODO: more options for other auth-methods, like ACL and organic groups.
+  // Probably only links to forms here, so this form doesn't get too big.
+  
+  return $form;
+}
+
+/**
+ * Helper function to manipulate the menu settings on the node edit page.
+ */
+function _menu_stp_form_alter_node_edit_form(&$form, &$form_state, $form_id) {
+  $rids = _menu_stp_get_user_roles();
+  $mlid = $form['menu']['mlid']['#value'];
+  
+  // If current user has no roles, skip check.
+  // This shouldn't be possible.
+  if (empty($rids)) {
+    return;
+  }
+  
+  // Do we already have a menu item?
+  if (!empty($mlid)) {
+    $plid = db_result(db_query("SELECT plid FROM {menu_links} WHERE mlid = %d", $mlid));
+    if (!_menu_stp_has_perms_roles($plid, $rids)) {
+      // Existing menu item is not in a permissable sub-tree.
+      // TODO: There should be better error handling here.
+      return;
+    }
+  }
+
+  // Get array of permissable menu roots.
+  $mroots = _menu_stp_get_menu_names_by_rids($rids);
+
+  // Get array of permissable menu items.
+  $mitems = _menu_stp_get_mlids_by_rids($rids);
+  
+  if (empty($mroots) && empty($mitems)) {
+    // There are no permissable roots/sub-trees for this user.
+    // TODO: There should be better error handling here.
+    return;
+  }
+  
+  // No advanced setting for normal user.
+  //? Drupal5.x
+  unset($form['menu']['advanced']);
+
+  // Seems we can do something -> enable form part.
+  //? Drupal5.x
+  $form['menu']['#access'] = true;
+
+  // Correct the parent select options.
+  foreach(array_keys($form['menu']['parent']['#options']) as $option) {
+    list($menu_name, $plid) = explode(":",$option);
+    
+    // If no permissions for this menu root, remove it.
+    if (empty($plid) && !in_array($menu_name, $mroots)) {
+      unset($form['menu']['parent']['#options'][$option]);
+    }
+    // If no permissions for this menu item, remove it.
+    elseif (!isset($mitems[$menu_name][$plid])) {
+      unset($form['menu']['parent']['#options'][$option]);
+    }
+    // If this is a sub-tree root, fix the title.
+    elseif ($mitems[$menu_name][$plid] && !empty($plid)) {
+      $form['menu']['parent']['#options'][$option] = _menu_stp_full_title($plid);
+    }
+  }
+}
+
+/**
+ * Create a menu title indicating the position in the menu structure.
+ */
+function _menu_stp_full_title($mlid) {
+  $link = menu_link_load($mlid);
+  $title = $link['title'];
+  $mlid = $link['plid'];
+  $menu_name = $link['menu_name'];
+  
+  $depth = 1;
+  while($mlid) {
+    $depth++;
+    
+    $link = menu_link_load($mlid);
+    $title = $link['title'] . '/' . $title;
+    $mlid = $link['plid'];
+  }
+  
+  return str_repeat('--', $depth) . ' ' . $menu_name . '/' . $title;
+}
+
+/**
+ * Helper function to get all menu roots permissable for a set of roles.
+ */
+function _menu_stp_get_menu_names_by_rids($rids) {
+  $menus = array();
+  
+  $result = db_query("SELECT DISTINCT menu_name FROM {menu_stp_menu_roles} WHERE rid IN (" . db_placeholders($rids, 'int') . ")", $rids);
+  while($row = db_fetch_object($result)) {
+    if (!empty($row->menu_name)) {
+      $menus[] = $row->menu_name;
+    }
+  }
+  
+  return $menus;
+}
+
+/**
+ * Helper function to get all menu IDs permissable for a set of roles.
+ *
+ * @returns array with menu name as keys, which contains arrays with the menu-ids as keys, values: TRUE for subtree-roots, FALSE for editable items below
+ */
+function _menu_stp_get_mlids_by_rids($rids) {
+  $menus = array();
+  
+  // Get root menu items.
+  $result = db_query("SELECT DISTINCT mlid FROM {menu_stp_roles} WHERE rid IN (" . db_placeholders($rids, 'int') . ")", $rids);
+  while($row = db_fetch_object($result)) {
+    if (!empty($row->mlid)) {
+      $link = _menu_stp_link_load($row->mlid);
+      $row->menu_name = $link['menu_name'];
+      $menus[$row->menu_name][strval($row->mlid)] = TRUE;
+    }
+  }
+  
+  foreach ($menus as $menu_name => $mlids) {
+    // Get the child items.
+    $new_mlids = array_keys($mlids);
+    while ($new_mlids) {
+      $result = db_query("SELECT menu_name, mlid FROM {menu_links} WHERE plid IN (" . db_placeholders($new_mlids, 'int') . ")", $new_mlids);
+      $new_mlids = array();
+      while($row = db_fetch_object($result)) {
+        // have we seen this mid before?
+        if (!isset($mlids[$row->mlid])) {
+          $new_mlids[] = $row->mlid;
+        }
+        if (!empty($row->mlid)) {
+          $menus[$row->menu_name][strval($row->mlid)] = FALSE;
+        }
+      }
+    }
+  }
+  
+  return $menus;
+}
+
+/**
+ * Helper function to get all roles that are directly permissable for this menu root.
+ */
+function _menu_stp_get_rids_by_menu_name($menu_name) {
+  $rids = array();
+  
+  $result = db_query("SELECT rid FROM {menu_stp_menu_roles} WHERE menu_name = '%s'", $menu_name);
+  while($row = db_fetch_object($result)) {
+    $rids[] = $row->rid;
+  }
+  
+  return $rids;
+}
+
+/**
+ * Helper function to get all roles that are directly permissable for this menu item.
+ */
+function _menu_stp_get_rids_by_mlid($mlid) {
+  $rids = array();
+  
+  $result = db_query("SELECT rid FROM {menu_stp_roles} WHERE mlid = %d", $mlid);
+  while($row = db_fetch_object($result)) {
+    $rids[] = $row->rid;
+  }
+  
+  return $rids;
+}
+
+/**
+ * Check if a user with the supplied roles has permission for the menu item.
+ */
+function _menu_stp_has_perms_roles($mlid, $rids, $recursive = TRUE) {                        
+  $mlids = array($mlid);
+  
+  // If recursive, gather mids back to root.
+  if ($recursive) {
+    while(!empty($mlid)) {
+      $mlid = db_result(db_query("SELECT plid FROM {menu_links} WHERE mlid = %d", $mlid));
+      if (!empty($mlid)) {
+        $mlids[] = $mlid;
+      }
+    }
+  }
+  
+  // Get permission count for this sub-tree.
+  return db_result(db_query(
+    "SELECT count(*) AS pnum " .
+    "FROM {menu_stp_roles} " .
+    "WHERE " .
+      "rid IN (" . db_placeholders($rids, 'int') . ") AND " .
+      "mlid IN (" . db_placeholders($mlids, 'int') . ")",
+    array_merge($rids, $mlids)
+  ));
+}
+
+/**
+ * Get roles for $account. If $account is NULL, get roles for current user.
+ */
+function _menu_stp_get_user_roles($account = NULL) {
+  global $user;
+  
+  if (empty($account->uid)) {
+    $account = $user;
+  }
+  
+  if (!empty($account->roles)) {
+    return array_keys($account->roles);
+  }
+  
+  return array();
+}
+
+/**
+ * Implementation of hook_help().
+ */
+function menu_stp_help($path, $arg) {
+  switch ($path) {
+    case 'admin/help#menu_stp':
+      return t('Provide means to allow users to modify parts of the menu without giving permissions for the whole menu structure.');
+      
+    case 'admin/modules#description':
+      return t('Allow users to edit some parts of the menu');
+      break;
+      
+    default:
+      if (strstr($path, 'menu_stp')) {
+        return "Missing: help for section '$path' in module 'menu_stp'";
+      }
+  }
+}
+
+/**
+ * Registered callback for form submission
+ */
+function menu_stp_form_submission($form, $form_state) {
+  $mlid = 0;
+  $menu_name = '';
+  
+  switch ($form['form_id']['#value']) {
+    case 'menu_edit_item':
+      $mlid = !empty($form['menu']['mlid']['#value']) ? $form['menu']['mlid']['#value'] : 0;
+      break;
+      
+    case 'menu_edit_menu':
+      $menu_name = !empty($form['menu_name']['#value']) ? $form['menu_name']['#value'] : '';
+      break;
+  }
+  
+  // If we have a valid mlid, store using mlid.
+  if (!empty($mlid)) {
+    // Delete old permissions
+    db_query("DELETE FROM {menu_stp_roles} WHERE mlid = %d", $mlid);
+    
+    foreach ($form_state['values']['menu_stp_perms_roles'] as $rid => $selected) {
+      // Does role get permission?
+      if ($selected) {
+        db_query("INSERT INTO {menu_stp_roles} (mlid, rid) VALUES (%d, %d)", $mlid, $rid);
+      }
+    }
+  }
+  // If we have only the menu name, store using menu name.
+  elseif (!empty($menu_name)) {
+    // Delete old permissions
+    db_query("DELETE FROM {menu_stp_menu_roles} WHERE menu_name = '%s'", $menu_name);
+    
+    foreach ($form_state['values']['menu_stp_perms_roles'] as $rid => $selected) {
+      // Does role get permission?
+      if ($selected) {
+        db_query("INSERT INTO {menu_stp_menu_roles} (menu_name, rid) VALUES ('%s', %d)", $menu_name, $rid);
+      }
+    }
+  }
+}
+
+/**
+ * Registered callback for deleting a menu item
+ */
+function menu_stp_delete_menu_item_confirm($form, $form_state) {
+  // A menu item is being deleted, so delete extra permissions as well.
+  db_query("DELETE FROM {menu_stp_roles} WHERE mlid = %d", $form['#item']['mlid']);
+}
+
+/**
+ * Registered callback for deleting a menu
+ */
+function menu_stp_delete_menu_confirm($form, $form_state) {
+  // A menu item is being deleted, so delete extra permissions as well.
+  db_query("DELETE FROM {menu_stp_menu_roles} WHERE menu_name = '%s'", $form['#item']['menu_name']);
+}
+
+/**
+ * Same as menu_link_load, but without further processing
+ */
+function _menu_stp_link_load($mlid) {
+  if (is_numeric($mlid) && $item = db_fetch_array(db_query("SELECT m.*, ml.* FROM {menu_links} ml LEFT JOIN {menu_router} m ON m.path = ml.router_path WHERE ml.mlid = %d", $mlid))) {
+    return $item;
+  }
+  return FALSE;
+}

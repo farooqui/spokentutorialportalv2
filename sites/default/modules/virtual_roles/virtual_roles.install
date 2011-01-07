@@ -1,0 +1,16 @@
+<?php
+// $Id: virtual_roles.install,v 1.1 2010/06/03 05:48:25 coreyp1 Exp $
+
+/**
+ * Implementation of hook_install().
+ */
+function virutal_roles_install() {
+  db_query("UPDATE {system} SET weight = -1 WHERE name = 'virtual_roles'");
+}
+
+/**
+ * Implemenation of hook_uninstall().
+ */
+function virtual_roles_uninstall() {
+}
+

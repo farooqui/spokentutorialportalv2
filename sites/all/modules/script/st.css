@@ -1,0 +1,57 @@
+.clearall{
+	clear:both;
+}
+.clearall-border{
+	clear:both;
+	border-bottom: 1px solid #000;
+}
+.script-cue {
+	width: 300px;
+	float: left;
+}
+
+.script-narration{
+	width: 450px;
+	float: left;
+	margin-left: 10px;
+}
+
+.cue-header {
+	width: 300px;
+	float: left;
+}
+
+.nar-header {
+	width: 450px;
+	margin-left: 10px;
+	float: left;
+}
+
+.script-cue-view {
+	float: left;
+	padding: 5px;
+	width: 300px;
+	display: table-cell;
+}
+
+.script-narration-view{
+	width: 450px;
+	float: left;
+	padding: 5px;
+	border-left: 1px solid #000;
+	display: table-cell;
+}
+
+.cue-header-view {
+	width: 300px;
+	float: left;
+	border-bottom: 1px solid #000;
+	padding: 5px;
+}
+
+.nar-header-view {
+	width: 450px;
+	border-bottom: 1px solid #000;
+	float: left;
+	padding: 5px;
+}

@@ -1,0 +1,656 @@
+<?php
+
+// $Id: annotate.module,v 1.14 2009/12/30 16:36:04 clemenstolboom Exp $
+
+/**
+ * @file
+ * Lets users add private annotations to nodes.
+ * Currently only allows 1 annotation per node.
+ * Variables are now saved to the variable database.
+ * Adds a text field when a node is displayed
+ * so that authenticated users may make notes.
+ */
+
+define( ANNOTATE_CREATE_ANNOTATION, 'create annotation');
+define( ANNOTATE_READ_PUBLISHED_ANNOTATION, 'read annotation');
+
+define( ANNOTATE_ENUM_VISIBILITY_PRIVATE, 0);
+define( ANNOTATE_ENUM_VISIBILITY_EDITOR, 1);
+define( ANNOTATE_ENUM_VISIBILITY_OTHERS, 2);
+define( ANNOTATE_ENUM_VISIBILITY_COLLABORATORS, 3);
+
+/**
+ * Implementation of hook_menu()
+ */
+function annotate_menu() {
+  $items = array();
+
+  $items[ 'admin/settings/annotate'] = array(
+    'title' => 'Annotation settings',
+    'description' => 'Change how annotations behave.',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('annotate_admin_settings'),
+    'access arguments' => array( 'administer site configuration'),
+  );
+
+  $items[ 'node/%/annotations'] = array(
+    'title' => 'Annotations',
+    'page callback' => 'annotate_list_by_node',
+    'page arguments' => array(1),
+    'access callback' => 'annotate_node_has_annotations_access', 
+    'access arguments' => array(1),
+    'type' => MENU_LOCAL_TASK,
+  );
+
+  $items['user/%/annotations'] = array(
+    'title' => 'Annotations',
+    'page callback' => 'annotate_list_by_user',
+    'page arguments' => array(1),
+    'access callback' => 'annotate_user_has_annotations_access', 
+    'access arguments' => array(1),
+    'type' => MENU_LOCAL_TASK,
+  );
+  return $items;
+}
+
+function annotate_node_has_annotations_access($nid) {
+  return is_numeric( $nid) 
+    && user_access( ANNOTATE_READ_PUBLISHED_ANNOTATION) 
+    && db_result(_annotate_list_by_node($nid))
+    ;
+}
+
+function annotate_user_has_annotations_access($uid) {
+  global $user;
+
+  return is_numeric($uid)
+    && ($user->uid == $uid || user_access( ANNOTATE_READ_PUBLISHED_ANNOTATION))
+    && db_result(_annotate_list_by_user($uid))
+    ; 
+}
+
+/**
+ * Implementation of hook_perm()
+ */
+function annotate_perm() {
+  return array( ANNOTATE_CREATE_ANNOTATION, ANNOTATE_READ_PUBLISHED_ANNOTATION);
+}
+
+/**
+ * Define the settings form.
+ */
+function annotate_admin_settings() {
+  $form['annotate_show_expanded'] = array(
+    '#type' => 'radios',
+    '#title' => t('Show the annotation form expanded'),
+    '#options' => array( '1' => t('Yes'), '0' => t('No')),
+    '#default_value' => variable_get('annotate_show_expanded', '0'),
+    '#description' => t('The annotation is not collapsed by default'),
+  );
+
+  $form['annotate_nodetypes'] = array(
+    '#type' => 'checkboxes',
+    '#title' => t('Users may annotate these node types'),
+    '#options' => node_get_types('names'),
+    '#default_value' => variable_get('annotate_nodetypes', array('story')),
+    '#description' => t('A text field will be available on these node types to make user-specific notes.'),
+  );
+
+  $form['multi']= array(
+      '#type' => 'fieldset',
+      '#title' => t('Multiple Annotations'),
+       '#prefix' => '<div class="annotation-fieldset">',
+  		'#suffix' => '</div>',
+    );
+  // TODO: validate with annotate_nodetypes
+  $form['multi']['annotate_show_multi_expanded'] = array(
+    '#type' => 'radios',
+    '#title' => t('Show the multiple annotation fieldset expanded'),
+    '#options' => array( '1' => t('Yes'), '0' => t('No')),
+    '#default_value' => variable_get('annotate_show_multi_expanded', '0'),
+    '#description' => t('The annotation is not collapsed by default'),
+  );
+  
+  $form['multi']['annotate_nodetypes_multiple'] = array(
+    '#type' => 'checkboxes',
+    '#title' => t('Multiple annotations for these node types'),
+    '#options' => node_get_types('names'),
+    '#default_value' => variable_get('annotate_nodetypes_multiple', array()),
+    '#description' => t('Multiple annotations per users are allowed for these node types.'),
+  );
+  
+  $options = _annotate_get_visibility_list();
+  
+  $form['annotate_visibility'] = array(
+    '#type' => 'radios',
+    '#title' => t('Default visibility'),
+    '#default_value' => variable_get('annotate_visibility', 0),
+    '#options' => $options,
+    '#description' => t('Default visibility of annotations'),
+  );
+  
+  $form['annotate_visibility_force'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('Force default visibility.'),
+    '#default_value' => variable_get('annotate_visibility_force', 0),
+    '#description' => t('This will hide the visibility option on annotations and force the site-wide default visibility setting above. Note that changing this will not affect existing annotation visibility settings - it will only affect new annotations.'),
+  );
+  
+  // FAPI 2 magic: make arrays auto compact
+  $form['array_filter'] = array(
+    '#type' => 'hidden'
+  );
+
+
+  return system_settings_form($form);
+}
+
+function annotate_admin_settings_validate($form, $form_values) {
+	$types = array_values( $form_values['values']['annotate_nodetypes']);
+	$multi = array_values( $form_values['values']['annotate_nodetypes_multiple']);
+	$diff = array_diff( $multi, $types, array(0));
+	if (count( $diff)) {
+		form_set_error('annotate_nodetypes_multiple', t("Mismatch between 'node types' and 'multiple'"));
+	}
+}
+
+/**
+ * Implementation of hook_nodeapi().
+ *
+ * We only intercept the view $op
+ *
+ * @param object $node
+ * @param string $op
+ * @param boolean $teaser
+ * @param boolean $page
+ */
+function annotate_nodeapi(&$node, $op, $teaser, $page) {
+  switch ($op) {
+    case 'view':
+      $node->content['debug']= array(
+        '#content' => "hoi",
+        '#weight' => 1,
+      );
+
+      global $user;
+      if ($teaser || $user->uid == 0) {
+        // no annotations for teaser or anonymous users
+        break;
+      }
+      
+      
+      // No form when user may not create an annotation
+      if (!user_access(ANNOTATE_CREATE_ANNOTATION)) {
+        break;
+      }
+      // only show for allowed node types
+      $types_to_annotate = variable_get('annotate_nodetypes', array('story'));
+      if (!in_array($node->type, $types_to_annotate)) {
+        break;
+      }
+      
+      if ($node->printing===TRUE) {
+        // We put all annotation into the printer friendly page
+        $node->content['annotate_print'] = array(
+          '#value' => annotate_list_by_node( $node->nid),
+          '#weight' => 50,
+        );
+      }
+      else {
+        drupal_add_css( drupal_get_path('module', 'annotate') .'/css/annotate.css');
+      	$node->notes=_annotate_get_notes($node, $user);
+        $node->content['annotate_print'] = array(
+          '#value' => _annotate_forms( $node),
+          '#weight' => 50,
+        );
+      }
+      break;
+
+    case 'delete':
+      _annotate_node_delete($node);
+      break;
+      
+    default:
+      break;
+  }
+}
+
+function _annotate_forms( $node) {
+	global $user;
+  $forms="";
+  foreach($node->notes as $index => $note) {
+  	if (!isset($note->uid) || $note->uid==$user->uid) {
+      $forms .= drupal_get_form('annotate_private_entry_form_' . $note->timestamp, $note);
+  	}
+  	else {
+  		$form=array();
+  		$form['annotate'] = array(
+        '#type' => 'fieldset',
+        '#title' => theme('annotate_fieldset_title', $note),
+        '#collapsible' => TRUE,
+        '#collapsed' => !$note->note && !variable_get('annotate_show_expanded', '0'),
+         '#prefix' => '<div class="annotation-fieldset">',
+  		'#suffix' => '</div>',
+      );
+      _annotate_prepare_view_item( $note);
+      $form['annotate']['note'] = array(
+        '#type' => 'markup',
+        '#value' => theme( 'annotate_node_item', $note),
+      );
+  		$forms .= drupal_render($form);
+  	}
+  }
+  
+  $multiple = in_array($node->type, variable_get('annotate_nodetypes_multiple', array()));
+  if ($multiple && count($node->notes)>1) {
+  	// Make fieldset displaying count of visible notes.
+  	$form=array();
+    $form['annotates_private'] = array(
+      '#type' => 'fieldset',
+      '#title' => t('Annotations') . ' (' . (count($node->notes) - 1) . ')',
+      '#collapsible' => TRUE,
+      '#collapsed' => !variable_get('annotate_show_multi_expanded', '0'),
+       '#prefix' => '<div class="annotation-fieldset">',
+  		'#suffix' => '</div>',
+    );
+    $form['annotates_private']['forms'] = array(
+      '#type' => 'markup',
+      '#value' => $forms,
+    );
+    $forms = drupal_render($form);          
+  }
+	
+  return $forms;
+}
+
+function _annotate_get_notes($node, $user) {
+  $multiple = in_array($node->type, variable_get('annotate_nodetypes_multiple', array()));
+      
+  $notes= array();
+  // Existing annotations
+  $result = _annotate_list_by_node( $node->nid);
+  //$result = _annotate_list_by_node_by_user( $node->nid, $user->uid);
+  while ($note = db_fetch_object($result)) {
+    $notes[]=$note;
+    if (!$multiple) {
+      break;
+    }
+  }
+  // Add new in non or multiple
+  if (!count($notes) || $multiple) {
+    // New annotation
+    $note= (object)array();
+    $note->nid=$node->nid;
+    $notes[]=$note;
+  }
+  return $notes;
+}
+/**
+ * Implementation of hook_user()
+ *
+ * We need to delete the user annotation when a user is deleted.
+ *
+ * @param string $op
+ * @param array $edit
+ * @param object $account
+ * @param string $category
+ */
+function annotate_user($op, &$edit, &$account, $category = NULL) {
+  switch($op) {
+    case 'delete':
+      _annotate_user_delete( $account);
+      break;
+
+    default:
+      break; 
+  }
+}
+
+/*
+ * Implementation of hook_forms
+ * 
+ * By adding an id next to the form builder we use have multiple forms.
+ * 
+ * Thanks to http://www.computerminds.co.uk/drupal-6-multiple-instances-same-form-one-page
+ */
+function annotate_forms($form_id) {
+	$forms = array(); 
+	if (strpos($form_id, 'annotate_private_entry_form_') === 0) {
+		$forms[$form_id] = array(
+		  'callback' => 'annotate_private_entry_form',
+		);
+	}
+	return $forms;
+}
+
+/**
+ * Define the form for entering an annotation.
+ * 
+ * The fieldset collapse if no annotation is made and allowed
+ */
+function annotate_private_entry_form($form_state, $note) {
+	$form['annotate'] = array(
+    '#type' => 'fieldset',
+    '#title' => theme('annotate_fieldset_title', $note),
+    '#collapsible' => TRUE,
+    '#collapsed' => !$note->note && !variable_get('annotate_show_expanded', '0'),
+    '#prefix' => '<div class="annotation-form-elements">',
+  	'#suffix' => '</div>',
+  );
+  
+  $form['annotate']['timestamp'] = array(
+    '#type' => 'value',
+    '#value' => $note->timestamp
+  );
+  
+  $form['annotate']['uid'] = array(
+    '#type' => 'value',
+    '#value' => $note->uid
+  );
+  
+  $form['annotate']['nid'] = array(
+    '#type' => 'value',
+    '#value' => $note->nid
+  );
+
+  $form['annotate']['note_filter']['note'] = array(
+    '#type' => 'textarea',
+    '#title' => t('Notes'),
+    '#default_value' => $note->note,
+    '#description' => t('Make your personal annotations about this content here. When marked private only you (and the site administrator) will be able to see them.'),
+  );
+  
+  $form['annotate']['note_filter']['format']= filter_form( $note->note_format);
+  
+  if (variable_get('annotate_visibility_force', 0) != 1) {
+    // This is only needed if default visibility settings are not forced.
+    $options = _annotate_get_visibility_list();
+
+    $form['annotate']['visibility'] = array(
+      '#type' => 'radios',
+      '#title' => t('Visibility'),
+      '#default_value' => isset($note->visibility) ? $note->visibility : variable_get('annotate_visibility', 0),
+      '#options' => $options,
+      '#description' => t('Set the visibility of this annotation'),
+    );
+  }
+  else {
+    $form['annotate']['visibility'] = array('#type' => 'value', '#value' => variable_get('annotate_visibility', 0));
+  }
+ 
+  $form['annotate']['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Update')
+  );
+  
+  // Make sure the correct submit handle is called.
+  $form['#submit'] = array(
+    'annotate_private_entry_form_submit',
+  ); 
+
+  return $form;
+}
+
+function _annotate_get_visibility_list() {
+  return array(
+    ANNOTATE_ENUM_VISIBILITY_PRIVATE => t('Private'),
+    ANNOTATE_ENUM_VISIBILITY_EDITOR => t('Node editor'),
+    ANNOTATE_ENUM_VISIBILITY_COLLABORATORS => t('Node annotators'),
+    ANNOTATE_ENUM_VISIBILITY_OTHERS => t('Others'),
+  );
+}
+
+/**
+ * implementation of hook_submit
+ */
+function annotate_private_entry_form_submit($form, &$form_state) {
+  global $user;
+  $nid = $form_state['values']['nid'];
+  $note_format = trim( $form_state['values']['format']);
+  $note = trim( $form_state['values']['note']);
+  $visibility = $form_state['values']['visibility'];
+  $timestamp = $form_state['values']['timestamp'];
+  
+  db_query("DELETE FROM {annotations} WHERE uid = %d AND nid = %d AND timestamp = %d", $user->uid, $nid, $timestamp);
+ 
+  if (isset($note) && strlen($note)) {
+    db_query("INSERT INTO {annotations} (uid, nid, note_format, note, visibility, timestamp) VALUES (%d, %d, %d, '%s', %d, %d)"
+      , $user->uid, $nid, $note_format, $note, $visibility, time()
+    );
+    
+    drupal_set_message(t('Your annotation was saved.'));
+  }
+  else {
+    drupal_set_message(t('Your annotation is deleted.'));
+  }
+}
+
+function annotate_theme() {
+  return array(
+    'annotate_user_item' => array(
+      'annotation' => NULL,
+    ),
+    'annotate_node_item' => array(
+      'annotation' => NULL,
+    ),
+    'annotate_fieldset_title' => array(
+      'annotation' => NULL,
+    ),
+  );
+}
+
+function theme_annotate_user_item( $annotation) {
+  return '<div class="annotation">'
+    . t('node')       .': '.'<span class="annotation-title">'. l( $annotation->title , 'node/'. $annotation->nid ) .'</span>'
+    . t('visibility') .': '.'<span class="annotation-visibility">'. $annotation->visibility .'</span>'
+    . t('written on') .': '.'<span class="annotation-timestamp">'. $annotation->formatted_timestamp .'</span>'
+    .'<span class="annotation-note">'. $annotation->note .'</span>'
+    .'</div>';
+}
+
+function theme_annotate_node_item( $annotation) {
+  return '<div class="annotation">'
+    . t('author')     .': '.'<span class="annotation-user">'
+    . (user_access( 'access_user_profiles') ? l($annotation->name, 'user/'. $annotation->uid ) : $annotation->name) 
+    . '</span>'
+    . t('visibility') .': '.'<span class="annotation-visibility">'. $annotation->visibility .'</span>'
+    . t('written on') .': '.'<span class="annotation-timestamp">'. $annotation->formatted_timestamp .'</span>'
+    .'<span class="annotation-note">'. $annotation->note .'</span>'
+    .'</div>';
+}
+
+function theme_annotate_fieldset_title( $annotation) {
+  return t('Annotation')
+    . ($annotation->note 
+    ? ' ' . t('by')
+      . ': ' . $annotation->name 
+      . " : '" . check_plain(substr($annotation->note,0, 30)) . "'"
+    : ': - ' . t('New note') . ' -');
+}
+
+/* ========== PRIVATE FUNCTIONS ========== */
+
+function _annotate_list_by_sql() {
+  $sql="SELECT n.nid, n.title, u.name, u.uid, a.visibility, a.note_format, a.note, a.timestamp"
+      ."  FROM {annotations} a "
+      ."    INNER JOIN {node} n ON a.nid= n.nid"
+      ."    INNER JOIN {users} u ON a.uid=u.uid"
+      ;
+  return $sql;
+}
+
+/**
+ * Get annotations by user
+ *
+ * Retrieves all annotations visible for the current user
+ * @param int $uid
+ * @return db_resultset
+ */
+function _annotate_list_by_user($account_uid) {
+  global $user;
+
+  $sql = _annotate_list_by_sql() ." WHERE a.uid = %d";
+
+  if ($user->uid==$account_uid || $user->uid==1) {
+    // own account : $account_uid == $user-> uid ==> show all
+    // user-1 ==> show all
+    $filter = "";
+  }
+  else {
+    $filter = " a.visibility= " . ANNOTATE_ENUM_VISIBILITY_OTHERS
+      . " OR (n.uid=%d AND a.visibility= " . ANNOTATE_ENUM_VISIBILITY_EDITOR . ")";
+
+    // AND-wrap
+    $filter = " AND (". $filter .")";
+  }
+  $sql .= $filter;
+  $sql .= ' ORDER BY timestamp';
+  
+  $sql = db_rewrite_sql( $sql);
+  $result = db_query( $sql, $account_uid, $user->uid);
+
+  return $result;
+}
+
+function _annotate_list_by_node($nid) {
+  global $user;
+  $uid= $user->uid;
+
+  $sql = _annotate_list_by_sql() ." WHERE a.nid = %d";
+  
+  if ($uid==1) {
+    $filter="";
+  }
+  else {
+    $filter=
+       "    a.uid = %d"
+      ." OR (a.visibility = " . ANNOTATE_ENUM_VISIBILITY_EDITOR . " AND %d = n.uid)"
+      ." OR a.visibility = " . ANNOTATE_ENUM_VISIBILITY_OTHERS;
+
+    $is_collaborator = _annotate_exists_by_node_by_user($nid, $uid);
+  
+    if ( $is_collaborator) {
+    	$filter .= " OR a.visibility = " . ANNOTATE_ENUM_VISIBILITY_COLLABORATORS;  
+    }
+    // AND-wrap
+    $filter = " AND (". $filter .")";
+  }
+  $sql .= $filter;
+  $sql .= ' ORDER BY timestamp';
+  $sql = db_rewrite_sql( $sql);
+  $result = db_query( $sql , $nid, $uid, $uid);
+ 
+  return $result;
+}
+
+function annotate_list_by_user($uid) {
+  $result= _annotate_list_by_user( $uid);
+
+  return _annotate_make_list($result);
+}
+
+function annotate_list_by_node($nid) {
+  $result= _annotate_list_by_node( $nid);
+
+  return _annotate_make_list($result);
+}
+
+function _annotate_list_by_node_by_user( $nid, $uid) {
+  $sql = "SELECT * FROM {annotations} WHERE nid = %d AND uid = %d";
+  $result = db_query( $sql, $nid, $uid);
+  return $result;
+}
+
+function _annotate_make_list($result) {
+  drupal_add_css( drupal_get_path('module', 'annotate') .'/css/annotate.css');
+
+  $items= array();
+
+  if ($result) {
+    while ($annotation = db_fetch_object( $result )) {
+      _annotate_prepare_view_item( $annotation);
+
+      $items[] = theme( 'annotate_user_item', $annotation);
+    }
+  }
+ 
+  return theme( 'item_list', $items, t('Annotations'), 'ul');
+}
+
+/**
+ * prepare a annotation for viewing
+ *
+ * @param object $annotation
+ */
+function _annotate_prepare_view_item( $annotation) {
+  $annotation->title = check_plain( $annotation->title);
+  $annotation->visibility = _annotate_visibility_to_text($annotation->visibility);
+  $annotation->note =  check_markup( $annotation->note, $annotation->note_format);
+  $annotation->formatted_timestamp= format_date($annotation->timestamp);
+}
+
+function _annotate_visibility_to_text( $visibility) {
+  static $list;
+ 
+  if (!$list) {
+  	$list= _annotate_get_visibility_list();
+  }
+ 
+  return $list[$visibility];
+}
+
+/**
+ * Delete annotations associated with a node
+ *
+ * @param object $node
+ */
+function _annotate_node_delete( &$node) {
+  $nid = $node->nid;
+  if (_annotate_exists_by_node( $nid)) {
+    db_query("DELETE FROM {annotations} WHERE nid = %d", $nid);
+    drupal_set_message(t('Annotations deleted for node %nid.', array( '%nid' => $nid)));
+  }
+}
+
+/**
+ * checks for the existance of node related annotations
+ *
+ * @param int $nid
+ * @return boolean
+ */
+function _annotate_exists_by_node( $nid) {
+  $result= db_query( ( "SELECT COUNT(*) AS num FROM {annotations} WHERE nid=%d"), $nid);
+  $row = db_fetch_array( $result);
+  return $row['num'] > 0;
+}
+
+/**
+ * Delete annotations associated with a user
+ *
+ * @param object $account
+ */
+function _annotate_user_delete( &$account) {
+  $uid = $account->uid;
+  if (_annotate_exists_by_user( $uid)) {
+    db_query("DELETE FROM {annotations} WHERE uid = %d", $uid);
+    drupal_set_message(t('Annotations deleted for user %uid.', array( '%uid' => $uid)));
+  }
+}
+
+/**
+ * checks for the existance of user related annotations
+ *
+ * @param int $uid
+ * @return boolean
+ */
+function _annotate_exists_by_user( $uid) {
+  $result= db_query( ( "SELECT COUNT(*) AS num FROM {annotations} WHERE uid=%d"), $uid);
+  $row = db_fetch_array( $result);
+  return $row['num'] > 0;
+}
+
+function _annotate_exists_by_node_by_user( $nid, $uid) {
+  $result= db_query( ( "SELECT COUNT(*) AS num FROM {annotations} WHERE nid = %d AND uid=%d"), $nid, $uid);
+  $row = db_fetch_array( $result);
+  return $row['num'] > 0;
+}

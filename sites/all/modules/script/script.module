@@ -1,0 +1,440 @@
+<?php 
+
+function script_node_info(){
+	return array(
+		'script' => array(
+			'name' => t('Spoken tutorial script.'),
+			'module' => 'script',
+			'description' => t('Spoken tutrial script in two column format.'),
+		),
+	);
+}
+
+function script_perm(){
+	return array(
+		'create script content',
+		'edit own script content',
+		'edit any script content',
+		'delete own script content',
+		'delete any script content',
+	);
+}
+
+function script_menu(){
+	$items = array();
+	$items['script/addrow'] = array(
+		'page callback' => '_get_row_elem',
+        'access arguments' => array('access content'),
+        'type' => MENU_CALLBACK,
+	);
+	
+	return $items;
+	
+}
+function script_init(){
+	drupal_add_css(drupal_get_path('module', 'script') . '/st.css');
+}
+
+function script_access($op, $node, $account) {
+	switch($op){
+		case 'create':
+			return user_access('create script content',$account);
+			
+		break;
+		case 'update':
+			if(user_access('edit any script content')){
+				return TRUE;
+			}
+			if(user_access('edit own script content') && $account->uid == $node->uid){
+				return TRUE;
+			}
+			break;
+		case 'delete':
+			if(user_access('delete any script content')){
+				return TRUE;
+			}
+			if(user_access('delete own script content') && $account->uid == $node->uid){
+				return TRUE;
+			}
+			break;
+		case 'load' :
+			
+		break;
+	}
+		
+}
+
+function script_form_alter(&$form, $form_state, $form_id){
+	
+	if ($form_id == 'script_node_form'){
+		$node = $form['#node'];
+		
+		$form['revision_information']['#access'] = false;
+		$form['title']= array(
+			'#title' => t('Title'),
+			'#type' => 'textfield',
+			'#required' => TRUE,
+			'#default_value' => $node->title,
+			'#weight' => -2,
+		);
+		
+		
+		
+		$form['script'] = array(
+			'#title' => t('Script'),
+			'#type' => 'fieldset',
+			'#descrition' => t('Each row is represented as a row in the script table. Use the "Add one more row" bitton to add multiple rows to script.'),
+		);
+
+		$form['script']['header'] = array(
+			'#value' => '<div class="cue-header"><strong> Visual Cue</strong></div><div class="nar-header"><strong> Narration</strong></div><div class="clearall"></div>',
+		);
+		
+		if($node->nid){
+			$lines = array();
+			$lines = _fetch_script_lines($node->nid,$node->vid);
+			$software_t = _fetch_script_software($node->nid);
+			$form['software_nid'] = array(
+				'#value' => '<div class="form-item"><label>Software:&nbsp;</label>'.$software_t.'</div>',
+				'#weight' => -1,
+			);
+			if(count($lines) < 1){
+				$form['script']['script_cue_0'] = array(
+					'#type' => 'textarea',
+					'#cols' => 30,
+					'#prefix' => '<div class="script-cue">',
+					'#suffix' => '</div>',
+				);
+
+				$form['script']['script_narration_0'] = array(
+					'#type' => 'textarea',
+					'#cols' => 10, 
+					'#prefix' => '<div class="script-narration">',
+					'#suffix' => '</div><div class="clearall"></div>',
+				);
+			}else{
+				$i = 0;
+				foreach($lines as $l){
+					$form['script']['script_cue_'.$i] = array(
+						'#type' => 'textarea',
+						'#cols' => 30,
+						'#prefix' => '<div class="script-cue">',
+						'#suffix' => '</div>',
+						'#default_value' => check_plain($l['cue']),
+					);
+
+					$form['script']['script_narration_'.$i] = array(
+						'#type' => 'textarea',
+						'#cols' => 10, 
+						'#prefix' => '<div class="script-narration">',
+						'#suffix' => '</div><div class="clearall"></div>',
+						'#default_value' => check_plain($l['narration']),
+					);
+
+					$form['script']['script_slid_'.$i] = array(
+						'#type' => 'hidden',
+						'#value' => $l['slid'],
+					);
+					$i++;
+				}
+			}
+		}else{
+			$soft_options = _list_all_software();
+			$form['software_nid'] = array(
+					'#type' => 'select',
+					'#title' => t('Software'),
+					'#options' => $soft_options,
+					'#required' => TRUE,
+					'#weight' => -1,
+				);
+			$form['script']['script_cue_0'] = array(
+				'#type' => 'textarea',
+				'#cols' => 30,
+				'#prefix' => '<div class="script-cue">',
+				'#suffix' => '</div>',
+			);
+
+			$form['script']['script_narration_0'] = array(
+				'#type' => 'textarea',
+				'#cols' => 10, 
+				'#prefix' => '<div class="script-narration">',
+				'#suffix' => '</div><div class="clearall"></div>',
+			);
+		}
+		
+
+		$form['script']['container'] = array(
+			'#value' => '<div id="row_wrap"></div>'
+		);
+		
+		$lines_count = empty($lines) ? 1 : count($lines);
+		$form['script']['lines_count'] = array(
+			'#type' => 'hidden',
+			'#value' => $lines_count,
+		);
+		
+		$form['script']['lineadd'] = array(
+			'#type' => 'button',
+			'#value' => t('Add another row to the script'),
+			'#ahah' => array(
+                      'path' => 'script/addrow',
+                      'wrapper' => 'row_wrap',
+                      'method' => 'append',
+                      'effect' => 'fade',
+			),
+		);
+	}
+}
+
+function _get_row_elem(){
+	
+	if (empty($_POST['form_build_id'])) {
+		// Invalid request.
+		drupal_json(array('data' => ''));
+		exit;
+	}
+
+	// Retrieve the cached form.
+	$form_state = array('submitted' => FALSE);
+	$form_build_id = $_POST['form_build_id'];
+	$form = form_get_cache($form_build_id, $form_state);
+	if (!$form) {
+		// Invalid form_build_id.
+		drupal_json(array('data' => ''));
+		exit;
+	}
+	
+	$form_copy = $form;
+	$form_state_copy = $form_state;
+	$form_copy['#post'] = array();
+	form_builder($_POST['form_id'], $form_copy, $form_state_copy);
+	// Just grab the data we need.
+	$form_state['values'] = $form_state_copy['values'];
+	// Reset cached ids, so that they don't affect the actual form we output.
+	form_clean_id(NULL, TRUE);
+
+	// Sort the $form_state['values'] we just built *and* the incoming $_POST data
+	// according to d-n-d reordering.
+	unset($form_state['values']['term_ip_add'.$tid]);
+	
+	$row_count = $form['script']['lines_count']['#value'];
+	$cue_elem = array(
+		'#type' => 'textarea',	
+		'#prefix' => '<div class="script-cue">',
+		'#suffix' => '</div>',
+	);
+	
+	$nar_elem = array(
+		'#type' => 'textarea',
+		'#prefix' => '<div class="script-narration">',
+		'#suffix' => '</div><div class="clearall"></div>',
+	);
+	
+	$form['script']['script_cue_'.$row_count] = $cue_elem;
+	$form['script']['script_narration_'.$row_count] = $nar_elem;
+	$form['script']['lines_count']['#value'] = $row_count + 1;
+
+	 $form_state['values'] = array();
+	 form_set_cache($form_build_id, $form, $form_state);
+	 $form_state = array('submitted' => FALSE);
+	 $form += array(
+          '#post' => $_POST,
+          '#programmed' => FALSE,
+	 );
+	 $form = form_builder($_POST['form_id'], $form, $form_state);
+
+	 $output = theme('status_messages') . drupal_render($form['script']['script_cue_'.$row_count] );
+	 $output .= drupal_render($form['script']['script_narration_'.$row_count]);
+	 $output .= drupal_render($form['script']['lines_count']);
+
+	 $GLOBALS['devel_shutdown'] =  FALSE;
+	 print drupal_to_js(array('status' => TRUE, 'data' => $output));
+	 exit;
+}
+
+function script_nodeapi(&$node, $op, $arg = 0){
+	
+	switch($op){
+		case 'presave':
+			$node->revision = 1;
+			watchdog('script','vid '.$node->vid);
+			$sql = 'select vid from {node} where nid =%d';
+			$vid_row = db_fetch_array(db_query($sql,$node->nid));
+			watchdog('script','vid in db '.$vid_row['vid']);
+			if($node->vid && $node->vid != $vid_row['vid']){
+				
+				$lines = _fetch_script_lines($node->nid,$node->vid);
+				$node->lines_count = count($lines);
+				$i=0;
+				foreach($lines as $l){
+					$nar = 'script_narration_'.$i;
+					$cue = 'script_cue_'.$i;
+					$node->$nar = $l['narration'];
+					$node->$cue = $l['cue'];
+					$i++;
+				}
+			}
+			
+		break;
+		
+		case 'insert':
+			$i = 0;
+			$sobj = new stdClass();
+			$sobj->scriptid = $node->nid;
+			$sobj->softwareid = $node->software_nid;
+			drupal_write_record('script_software',$sobj);
+			
+			while($i <  $node->lines_count){
+				$nar = 'script_narration_'.$i;
+				$cue = 'script_cue_'.$i;
+				$obj = new stdClass();
+				$obj->nid = $node->nid;
+				$obj->vid = $node->vid;
+				$obj->cue = $node->$cue;
+				$obj->narration = $node->$nar;
+				drupal_write_record('script_line',$obj);
+				$i++;
+			}
+		break;
+		case 'update':
+			$i = 0;
+			while($i <  $node->lines_count){
+				
+				$nar = 'script_narration_'.$i;
+				$cue = 'script_cue_'.$i;
+				$obj = new stdClass();
+				$obj->nid = $node->nid;
+				$obj->vid = $node->vid;
+				$obj->cue = $node->$cue;
+				$obj->narration = $node->$nar;
+				drupal_write_record('script_line',$obj);
+				watchdog('script', 'narration '.$node->$nar);
+				$i++;
+			}
+		break;
+		case 'view':
+			
+			if($node->type == 'script'){
+				
+				$table = '<table><tr><th>Visula cue</th><th>Narration</th></tr>';
+				$table .= '</table>';
+				$node->content['body']['#value']= theme('script_view',$node);
+			}
+			
+		break;
+		case 'delete':
+			script_delete_node($node);
+		break;	
+	
+		case 'delete revision':
+			script_delete_revision($node);
+		break;
+		case 'validate':
+			if($node->software_nid == 0){
+				form_set_error($node->software_nid,'Please select a software.');
+			}
+		break;
+	}
+	
+}
+
+function _fetch_script_lines($nid,$vid){
+	$sql = 'select * from {script_line} where nid=%d and vid=%d order by slid';
+	$result = db_query($sql,$nid,$vid);
+	$resp = array();
+	while($row = db_fetch_array($result)){
+		
+		$resp[] = array(
+			'slid' => $row['slid'],
+			'nid' => $row['nid'],
+			'vid' => $row['vid'],
+			'cue' => $row['cue'],
+			'narration' => $row['narration'],
+		);
+	}
+	return $resp;
+}
+
+function script_theme(){
+	return array(
+		'script_view' => array(
+			'arguments' => array('node' => NULL), 
+		),
+	);
+}
+
+function theme_script_view($node){
+	$output = '<div class="cue-header-view"><strong> Visual Cue</strong></div><div class="nar-header-view"><strong> Narration</strong></div><div class="clearall"></div>';
+	$lines = _fetch_script_lines($node->nid,$node->vid);
+	foreach($lines as $l){
+		$output .= '<div class="script-cue-view">';
+		$output .= check_markup($l['cue']);
+		$output .= '</div>';
+		$output .= '<div class="script-narration-view">';
+		$output .= check_markup($l['narration']);
+		$output .= '</div><div class="clearall-border"></div>';
+	}
+	return $output; 
+}
+
+function script_delete_revision($node){
+	$sql = 'delete from {script_line} where nid=%d and vid=%d';
+	db_query($sql,$node->nid,$node->vid);
+}
+
+function script_delete_node($node){
+	$sql = 'delete from {script_line} where nid=%d';
+	db_query($sql,$node->nid);
+}
+
+function script_virtual_roles(){
+	return array(
+		'user_is_expert' => array(
+			'title' => t('User is a software expert'),
+			'callback' => 'user_expert',
+			'file' => 'context_condition_script.inc',
+			'path' => drupal_get_path('module', 'script') .'/plugins'
+		),
+		'user_is_reviewer' => array(
+			'title' => t('User is a software reviewer'),
+			'callback' => 'user_reviewer',
+			'file' => 'context_condition_script.inc',
+			'path' => drupal_get_path('module', 'script') .'/plugins'
+		),
+		'user_is_junior' => array(
+			'title' => t('User is a junior to the software'),
+			'callback' => 'user_junior',
+			'file' => 'context_condition_script.inc',
+			'path' => drupal_get_path('module', 'script') .'/plugins'
+		),
+	);
+}
+
+function _list_all_software(){
+	if(user_access('adminster nodes')){
+		$sql = 'select nid,title from {node} where type=\'software\'';
+		$result = db_query($sql);	
+	}else{
+		global $user;
+		$sql ='select n.nid,n.title from script_software ss join node n on ss.softwareid=n.nid 
+		join content_field_reviewers cfr on cfr.nid=ss.softwareid join content_field_juniors cfj on cfj.nid=ss.softwareid
+		join content_field_software_experts cse on cse.nid=ss.softwareid where 
+		(n.vid=cse.vid and n.vid=cfr.vid and n.vid=cfj.vid) and (cse.field_software_experts_uid = %d or cfj.field_juniors_uid=%d or cfr.field_reviewers_uid=%d)';
+		$result = db_query($sql,$user->uid);
+	}
+
+	$resp = array();
+	$resp[0] = '';
+	while($row = db_fetch_array($result)){
+		$resp[$row['nid']] = $row['title'];
+	}
+	return $resp;
+}
+
+function _fetch_script_software($scriptid){
+	
+	$sql = 'select title from {script_software} ss LEFT JOIN {node} n on ss.softwareid=n.nid where ss.scriptid=%d';	
+	$result = db_fetch_array(db_query($sql,$scriptid));
+	return $result['title'];
+}
+

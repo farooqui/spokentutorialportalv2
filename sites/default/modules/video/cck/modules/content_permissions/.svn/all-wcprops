@@ -1,0 +1,23 @@
+K 25
+svn:wc:ra_dav:version-url
+V 80
+/svn/!svn/ver/656/ETOOLS/trunk/sites/all/modules/cck/modules/content_permissions
+END
+content_permissions.install
+K 25
+svn:wc:ra_dav:version-url
+V 108
+/svn/!svn/ver/656/ETOOLS/trunk/sites/all/modules/cck/modules/content_permissions/content_permissions.install
+END
+content_permissions.module
+K 25
+svn:wc:ra_dav:version-url
+V 107
+/svn/!svn/ver/656/ETOOLS/trunk/sites/all/modules/cck/modules/content_permissions/content_permissions.module
+END
+content_permissions.info
+K 25
+svn:wc:ra_dav:version-url
+V 105
+/svn/!svn/ver/656/ETOOLS/trunk/sites/all/modules/cck/modules/content_permissions/content_permissions.info
+END

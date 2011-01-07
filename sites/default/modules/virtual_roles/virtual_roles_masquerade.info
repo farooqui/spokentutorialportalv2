@@ -1,0 +1,14 @@
+; $Id: virtual_roles_masquerade.info,v 1.1 2010/06/03 05:48:25 coreyp1 Exp $
+name = Virtual Roles Masquerade
+description = When Masquerading, combines the permissions of both the original and target users.
+core = 6.x
+dependencies[] = masquerade
+dependencies[] = virtual_roles
+
+
+; Information added by drupal.org packaging script on 2010-06-03
+version = "6.x-1.0"
+core = "6.x"
+project = "virtual_roles"
+datestamp = "1275545715"
+

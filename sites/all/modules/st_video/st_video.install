@@ -1,0 +1,34 @@
+<?php 
+
+function st_video_schema(){
+	$schema = array();
+	$schema['st_video_files'] = array(
+  'description' => t('TODO: please describe this table!'),
+  'fields' => array(
+    'nid' => array(
+      'description' => t('TODO: please describe this field!'),
+      'type' => 'int',
+      'not null' => TRUE,
+    ),
+    'vid' => array(
+      'description' => t('TODO: please describe this field!'),
+      'type' => 'int',
+      'not null' => TRUE,
+    ),
+    'fid' => array(
+      'description' => t('TODO: please describe this field!'),
+      'type' => 'int',
+      'not null' => TRUE,
+    ),
+  ),
+  'primary key' => array('nid', 'vid'),
+);
+	return $schema;
+}
+
+function st_video_install(){
+	drupal_install_schema('st_video');
+}
+function st_vieo_uninstall(){
+	drupal_uninstall_schema('st_video');
+}

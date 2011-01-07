@@ -1,0 +1,41 @@
+K 25
+svn:wc:ra_dav:version-url
+V 71
+/svn/!svn/ver/656/ETOOLS/trunk/sites/all/modules/cck/modules/fieldgroup
+END
+fieldgroup.install
+K 25
+svn:wc:ra_dav:version-url
+V 90
+/svn/!svn/ver/656/ETOOLS/trunk/sites/all/modules/cck/modules/fieldgroup/fieldgroup.install
+END
+fieldgroup.module
+K 25
+svn:wc:ra_dav:version-url
+V 89
+/svn/!svn/ver/656/ETOOLS/trunk/sites/all/modules/cck/modules/fieldgroup/fieldgroup.module
+END
+fieldgroup-simple.tpl.php
+K 25
+svn:wc:ra_dav:version-url
+V 97
+/svn/!svn/ver/656/ETOOLS/trunk/sites/all/modules/cck/modules/fieldgroup/fieldgroup-simple.tpl.php
+END
+fieldgroup-rtl.css
+K 25
+svn:wc:ra_dav:version-url
+V 90
+/svn/!svn/ver/656/ETOOLS/trunk/sites/all/modules/cck/modules/fieldgroup/fieldgroup-rtl.css
+END
+fieldgroup.info
+K 25
+svn:wc:ra_dav:version-url
+V 87
+/svn/!svn/ver/656/ETOOLS/trunk/sites/all/modules/cck/modules/fieldgroup/fieldgroup.info
+END
+fieldgroup.css
+K 25
+svn:wc:ra_dav:version-url
+V 86
+/svn/!svn/ver/656/ETOOLS/trunk/sites/all/modules/cck/modules/fieldgroup/fieldgroup.css
+END

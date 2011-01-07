@@ -1,0 +1,72 @@
+<?php 
+
+function script_schema(){
+	$schema =array();
+	$schema['script_line'] = array(
+  'description' => t('TODO: please describe this table!'),
+  'fields' => array(
+    'slid' => array(
+      'description' => t('TODO: please describe this field!'),
+      'type' => 'serial',
+      'not null' => TRUE,
+    ),
+    'nid' => array(
+      'description' => t('TODO: please describe this field!'),
+      'type' => 'int',
+      'not null' => TRUE,
+    ),
+    'vid' => array(
+      'description' => t('TODO: please describe this field!'),
+      'type' => 'int',
+      'not null' => TRUE,
+    ),
+    'cue' => array(
+      'description' => t('TODO: please describe this field!'),
+      'type' => 'text',
+      'size' => 'big',
+      'not null' => TRUE,
+    ),
+    'narration' => array(
+      'description' => t('TODO: please describe this field!'),
+      'type' => 'text',
+      'size' => 'big',
+      'not null' => TRUE,
+    ),
+  ),
+  'primary key' => array('slid'),
+  'indexes' => array(
+    'nid' => array('nid', 'vid'),
+  ),
+);
+$schema['script_software'] = array(
+  'description' => t('TODO: please describe this table!'),
+  'fields' => array(
+    'relid' => array(
+      'description' => t('TODO: please describe this field!'),
+      'type' => 'serial',
+      'not null' => TRUE,
+    ),
+    'softwareid' => array(
+      'description' => t('TODO: please describe this field!'),
+      'type' => 'int',
+      'not null' => TRUE,
+    ),
+    'scriptid' => array(
+      'description' => t('TODO: please describe this field!'),
+      'type' => 'int',
+      'not null' => TRUE,
+    ),
+  ),
+  'primary key' => array('relid'),
+);
+
+	return $schema;
+}
+
+function script_install(){
+	drupal_schema_install('script_line');
+}
+
+function script_uninstall(){
+	drupal_schema_unistall('script_line');
+}
